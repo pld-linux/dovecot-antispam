@@ -2,7 +2,7 @@ Summary:	The dovecot antispam plugin
 Summary(pl.UTF-8):	Wtyczka antyspamowa dla dovecota
 Name:		dovecot-antispam
 Version:	2.0
-Release:	2
+Release:	3
 License:	GPL v2
 Group:		Daemons
 Source0:	http://johannes.sipsolutions.net/download/dovecot-antispam/%{name}-%{version}.tar.bz2
@@ -30,7 +30,7 @@ way it was moved).
 
 %install
 rm -rf $RPM_BUILD_ROOT
-install -d $RPM_BUILD_ROOT{%{_libdir}/dovecot,%{_mandir}/man7}
+install -d $RPM_BUILD_ROOT{%{_libdir}/dovecot/plugins,%{_mandir}/man7}
 
 %{__make} install \
 	INSTALLDIR=%{_libdir}/dovecot/plugins \
