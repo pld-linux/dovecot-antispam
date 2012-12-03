@@ -1,0 +1,268 @@
+diff --git a/antispam-plugin.h b/antispam-plugin.h
+index 280bb12..72b906d 100644
+--- a/antispam-plugin.h
++++ b/antispam-plugin.h
+@@ -98,8 +98,10 @@ struct antispam_config {
+ 			int extra_env_num;
+ 		} crm;
+ 		struct {
+-			const char *spam_arg;
+-			const char *ham_arg;
++			char **spam_args;
++			int spam_args_num;
++			char **ham_args;
++			int ham_args_num;
+ 			const char *pipe_binary;// = "/usr/sbin/sendmail";
+ 			const char *tmpdir;// = "/tmp";
+ 			char **extra_args;
+@@ -260,7 +262,7 @@ o_stream_create_from_fd(int fd, pool_t pool ATTR_UNUSED)
+ {
+ 	return o_stream_create_fd(fd, 0, TRUE);
+ }
+-#elif DOVECOT_IS_EQ(2, 0)
++#elif DOVECOT_IS_EQ(2, 0) || DOVECOT_IS_EQ(2, 1)
+ #define mempool_unref		pool_unref
+ #define module_arg		struct module *
+ #define ME(err)			MAIL_ERROR_ ##err,
+diff --git a/antispam-storage-2.0.c b/antispam-storage-2.0.c
+index 5a089bc..3e67553 100644
+--- a/antispam-storage-2.0.c
++++ b/antispam-storage-2.0.c
+@@ -472,7 +472,7 @@ static void antispam_mailbox_allocated(struct mailbox *box)
+ 
+ 	asbox->save_hack = FALSE;
+ 	asbox->movetype = MMT_APPEND;
+-		asbox->cfg = asuser->cfg;
++	asbox->cfg = asuser->cfg;
+ 
+ 	v->free = antispam_mailbox_free;
+ 
+diff --git a/antispam.7 b/antispam.7
+index 5e33e4c..5d077f0 100644
+--- a/antispam.7
++++ b/antispam.7
+@@ -1,4 +1,4 @@
+-.TH ANTISPAM 7 "15 October 2007" "" ""
++.TH ANTISPAM 7 "24 March 2012" "" ""
+ .SH NAME
+ antispam \- The dovecot antispam plugin.
+ 
+@@ -206,6 +206,11 @@ plugin {
+     # semicolon-separated list of blacklisted results, case insensitive
+     # antispam_dspam_result_blacklist = Virus
+ 
++    # semicolon-separated list of environment variables to set
++    # (default unset i.e. none)
++    # antispam_dspam_env =
++    # antispam_dspam_env = HOME=%h;USER=%u
++
+     #=====================
+     # pipe plugin
+     #
+@@ -228,6 +233,14 @@ plugin {
+     # "mailtrain" are still valid, these are, in the same order as
+     # above: antispam_mail_sendmail, antispam_mail_sendmail_args,
+     # antispam_mail_spam, antispam_mail_notspam and antispam_mail_tmpdir.
++    #
++    # Alternatively, if you need to give multiple options, you can use
++    # the spam_args/notspam_args parameters (which are used in preference
++    # of the singular form):
++    #   antispam_pipe_program_spam_args = --spam;--my-other-param1
++    #   antispam_pipe_program_notspam_args = --ham;--my-other-param2
++    # which will then call
++    #   /path/to/mailtrain --for jberg --spam --my-other-param1
+ 
+     # temporary directory
+     antispam_pipe_tmpdir = /tmp
+@@ -247,7 +260,7 @@ plugin {
+     antispam_crm_binary = /bin/false
+     # antispam_crm_binary = /usr/share/crm114/mailreaver.crm
+ 
+-    # semicolon-separated list of extra arguments to dspam
++    # semicolon-separated list of extra arguments to crm114
+     # (default unset i.e. none)
+     # antispam_crm_args =
+     # antispam_crm_args = --config=/path/to/config
+@@ -257,11 +270,6 @@ plugin {
+     # antispam_crm_env =
+     # antispam_crm_env = HOME=%h;USER=%u
+ 
+-    # semicolon-separated list of environment variables to set
+-    # (default unset i.e. none)
+-    # antispam_dspam_env =
+-    # antispam_dspam_env = HOME=%h;USER=%u
+-
+     # NOTE: you need to set the signature for this backend
+     antispam_signature = X-CRM114-CacheID
+ 
+diff --git a/dovecot-version.c b/dovecot-version.c
+index cbcb35b..0026fbf 100644
+--- a/dovecot-version.c
++++ b/dovecot-version.c
+@@ -17,21 +17,24 @@ int main(int argc, char **argv)
+ 
+ 	maj = strtol(v, &e, 10);
+ 	if (v == e)
+-		return 1;
++		return 2;
+ 
+ 	v = e + 1;
+ 
+ 	min = strtol(v, &e, 10);
+ 	if (v == e)
+-		return 1;
++		return 3;
+ 
+ 	/* not end of string yet? */
+ 	if (*e) {
+ 		v = e + 1;
+ 
+-		patch = strtol(v, &e, 10);
+-		if (v == e)
+-			return 1;
++		if (isdigit(*v)) {
++			patch = strtol(v, &e, 10);
++			if (v == e)
++				return 4;
++		} else
++			patch = 255;
+ 	}
+ 
+ 	printf("/* Auto-generated file, do not edit */\n\n");
+@@ -50,6 +53,11 @@ int main(int argc, char **argv)
+ 		"DOVECOT_VCODE < DOVECOT_VERSION_CODE(maj, min, 0)\n");
+ 	printf("#define DOVECOT_IS_LE(maj, min)			"
+ 		"DOVECOT_VCODE <= DOVECOT_VERSION_CODE(maj, min, 0)\n");
++
++	/* Use the antispam-storage-2.0.c for dovecot 2.1 as well */
++	if (maj == 2 && min == 1)
++		min = 0;
++
+ 	printf("#define ANTISPAM_STORAGE			"
+ 		"\"antispam-storage-%d.%d.c\"\n", maj, min);
+ 
+diff --git a/pipe.c b/pipe.c
+index 18c2233..a20b4aa 100644
+--- a/pipe.c
++++ b/pipe.c
+@@ -34,16 +34,19 @@
+ static int run_pipe(const struct antispam_config *cfg,
+ 		    int mailfd, enum classification wanted)
+ {
+-	const char *dest;
++	char **dest;
++	int dest_num;
+ 	pid_t pid;
+ 	int status;
+ 
+ 	switch (wanted) {
+ 	case CLASS_SPAM:
+-		dest = cfg->pipe.spam_arg;
++		dest = cfg->pipe.spam_args;
++		dest_num = cfg->pipe.spam_args_num;
+ 		break;
+ 	case CLASS_NOTSPAM:
+-		dest = cfg->pipe.ham_arg;
++		dest = cfg->pipe.ham_args;
++		dest_num = cfg->pipe.spam_args_num;
+ 		break;
+ 	}
+ 
+@@ -65,18 +68,23 @@ static int run_pipe(const struct antispam_config *cfg,
+ 		return WEXITSTATUS(status);
+ 	} else {
+ 		char **argv;
+-		int sz = sizeof(char *) * (2 + cfg->pipe.extra_args_num + 1);
+-		int i, fd;
++		int sz = sizeof(char *) * (2 + cfg->pipe.extra_args_num + dest_num + 1);
++		int i, j, fd;
+ 
+ 		argv = i_malloc(sz);
+ 		memset(argv, 0, sz);
+ 
+ 		argv[0] = (char *) cfg->pipe.pipe_binary;
+ 
+-		for (i = 0; i < cfg->pipe.extra_args_num; i++)
++		for (i = 0; i < cfg->pipe.extra_args_num; i++) {
+ 			argv[i + 1] = (char *) cfg->pipe.extra_args[i];
++			debug(&cfg->dbgcfg, "running mailtrain backend program parameter %d %s", i + 1, argv[i + 1]);
++		}
+ 
+-		argv[i + 1] = (char *) dest;
++		for (j = 0; j < dest_num; j++) {
++			argv[i + 1 + j] = (char *) dest[j];
++			debug(&cfg->dbgcfg, "running mailtrain backend program parameter %d %s", i + 1 + j, argv[i + 1 + j]);
++		}
+ 
+ 		dup2(mailfd, 0);
+ 		fd = open("/dev/null", O_WRONLY);
+@@ -228,7 +236,7 @@ static int backend_handle_mail(const struct antispam_config *cfg,
+ 		return -1;
+ 	}
+ 
+-	if (!cfg->pipe.ham_arg || !cfg->pipe.spam_arg) {
++	if (!cfg->pipe.ham_args || !cfg->pipe.spam_args) {
+ 		mail_storage_set_error(t->box->storage,
+ 				       ME(NOTPOSSIBLE)
+ 				       "antispam plugin not configured");
+@@ -316,20 +324,50 @@ static void backend_init(struct antispam_config *cfg,
+ 	const char *tmp;
+ 	int i;
+ 
+-	tmp = getenv("PIPE_PROGRAM_SPAM_ARG", getenv_data);
+-	if (!tmp)
+-		tmp = getenv("MAIL_SPAM", getenv_data);
++	tmp = getenv("PIPE_PROGRAM_SPAM_ARGS", getenv_data);
+ 	if (tmp) {
+-		cfg->pipe.spam_arg = tmp;
+-		debug(&cfg->dbgcfg, "pipe backend spam argument = %s\n", tmp);
++		cfg->pipe.spam_args = p_strsplit(cfg->mem_pool, tmp, ";");
++		cfg->pipe.spam_args_num = str_array_length(
++					(const char *const *)cfg->pipe.spam_args);
++		for (i = 0; i < cfg->pipe.spam_args_num; i++)
++			debug(&cfg->dbgcfg, "pipe backend spam arg[%d] = %s\n",
++			      i, cfg->pipe.spam_args[i]);
++	} else {
++		tmp = getenv("PIPE_PROGRAM_SPAM_ARG", getenv_data);
++		if (!tmp)
++			tmp = getenv("MAIL_SPAM", getenv_data);
++		if (tmp) {
++			/* bit of a hack */
++			cfg->pipe.spam_args =
++				p_strsplit(cfg->mem_pool, tmp, "\x01");
++			cfg->pipe.spam_args_num = 1;
++			debug(&cfg->dbgcfg,
++			      "pipe backend spam argument = %s\n", tmp);
++			tmp = NULL;
++		}
+ 	}
+ 
+-	tmp = getenv("PIPE_PROGRAM_NOTSPAM_ARG", getenv_data);
+-	if (!tmp)
+-		tmp = getenv("MAIL_NOTSPAM", getenv_data);
++	tmp = getenv("PIPE_PROGRAM_NOTSPAM_ARGS", getenv_data);
+ 	if (tmp) {
+-		cfg->pipe.ham_arg = tmp;
+-		debug(&cfg->dbgcfg, "pipe backend not-spam argument = %s\n", tmp);
++		cfg->pipe.ham_args = p_strsplit(cfg->mem_pool, tmp, ";");
++		cfg->pipe.ham_args_num = str_array_length(
++					(const char *const *)cfg->pipe.ham_args);
++		for (i = 0; i < cfg->pipe.ham_args_num; i++)
++			debug(&cfg->dbgcfg, "pipe backend ham arg[%d] = %s\n",
++			      i, cfg->pipe.ham_args[i]);
++	} else {
++		tmp = getenv("PIPE_PROGRAM_NOTSPAM_ARG", getenv_data);
++		if (!tmp)
++			tmp = getenv("MAIL_NOTSPAM", getenv_data);
++		if (tmp) {
++			/* bit of a hack */
++			cfg->pipe.ham_args =
++				p_strsplit(cfg->mem_pool, tmp, "\x01");
++			cfg->pipe.ham_args_num = 1;
++			debug(&cfg->dbgcfg,
++			      "pipe backend not-spam argument = %s\n", tmp);
++			tmp = NULL;
++		}
+ 	}
+ 
+ 	tmp = getenv("PIPE_PROGRAM", getenv_data);

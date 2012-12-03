@@ -2,12 +2,12 @@ Summary:	The dovecot antispam plugin
 Summary(pl.UTF-8):	Wtyczka antyspamowa dla dovecota
 Name:		dovecot-antispam
 Version:	2.0
-Release:	9
+Release:	10
 License:	GPL v2
 Group:		Daemons
 Source0:	http://johannes.sipsolutions.net/download/dovecot-antispam/%{name}-%{version}.tar.bz2
 # Source0-md5:	14547898759fbd93f2b98304520decc6
-Patch0:		dovecot-2.1.patch
+Patch0:		%{name}-git.patch
 URL:		http://johannes.sipsolutions.net/Projects/dovecot-antispam
 BuildRequires:	dovecot-devel >= 1:2.0
 %requires_eq_to	dovecot dovecot-devel
@@ -19,12 +19,9 @@ SPAM folder and tells the spam classifier that it made an error and
 needs to re-classify the message (as spam/not spam depending on which
 way it was moved).
 
-#%description -l pl.UTF-8
-
 %prep
 %setup -q
 %patch0 -p1
-cp -a antispam-storage-2.0.c antispam-storage-2.1.c
 
 %build
 %{__make} \
