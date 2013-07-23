@@ -39,3 +39,14 @@ diff -ur dovecot-antispam-2.0/dovecot-version.c dovecot-antispam-2.0-2.2/dovecot
  		min = 0;
  
  	printf("#define ANTISPAM_STORAGE			"
+--- dovecot-antispam-2.0/antispam-plugin.c~	2011-11-07 10:49:47.000000000 +0100
++++ dovecot-antispam-2.0/antispam-plugin.c	2013-07-23 20:19:25.951626755 +0200
+@@ -392,4 +392,8 @@
+ }
+ 
+ /* put dovecot version we built against into plugin for checking */
++#ifdef DOVECOT_ABI_VERSION
++const char *PLUGIN_FUNCTION(version) = DOVECOT_ABI_VERSION;
++#else
+ const char *PLUGIN_FUNCTION(version) = PACKAGE_VERSION;
++#endif
