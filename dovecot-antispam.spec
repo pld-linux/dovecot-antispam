@@ -2,13 +2,14 @@ Summary:	The dovecot antispam plugin
 Summary(pl.UTF-8):	Wtyczka antyspamowa dla dovecota
 Name:		dovecot-antispam
 Version:	2.0
-Release:	20
+Release:	21
 License:	GPL v2
 Group:		Daemons
 Source0:	http://johannes.sipsolutions.net/download/dovecot-antispam/%{name}-%{version}.tar.bz2
 # Source0-md5:	14547898759fbd93f2b98304520decc6
 Patch0:		%{name}-git.patch
 Patch1:		dovecot-2.2.patch
+Patch2:		dovecot-2.2.14.patch
 URL:		http://johannes.sipsolutions.net/Projects/dovecot-antispam
 BuildRequires:	dovecot-devel >= 1:2.0
 %requires_eq_to	dovecot dovecot-devel
@@ -24,6 +25,7 @@ way it was moved).
 %setup -q
 %patch0 -p1
 %patch1 -p1
+%patch2 -p1
 
 %build
 unset GIT_DIR
