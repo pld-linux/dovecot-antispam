@@ -1,7 +1,72 @@
+diff --git a/antispam-plugin.c b/antispam-plugin.c
+index 7756204..76ced7b 100644
+--- a/antispam-plugin.c
++++ b/antispam-plugin.c
+@@ -90,7 +90,7 @@ static bool mailbox_patternmatch(struct mailbox *box,
+ 		return FALSE;
+ #endif
+ 
+-	t_push();
++	T_BEGIN {
+ 
+ 	boxname = mailbox_get_name(box);
+ 	if (lowercase) {
+@@ -110,7 +110,7 @@ static bool mailbox_patternmatch(struct mailbox *box,
+ 
+ 	rc = memcmp(name, boxname, len) == 0;
+ 
+-	t_pop();
++	} T_END;
+ 
+ 	return rc;
+ }
+@@ -257,7 +257,7 @@ static int parse_folder_setting(const struct antispam_config *cfg,
+ 	int cnt = 0;
+ 	enum match_type i;
+ 
+-	t_push();
++	T_BEGIN {
+ 
+ 	for (i = 0; i < NUM_MT; ++i) {
+ 		tmp = getenv(t_strconcat(setting, match_info[i].suffix, NULL),
+@@ -286,7 +286,7 @@ static int parse_folder_setting(const struct antispam_config *cfg,
+ 		}
+ 	}
+ 
+-	t_pop();
++	} T_END;
+ 
+ 	if (!cnt)
+ 		debug(&cfg->dbgcfg, "no %s folders\n", display_name);
+@@ -392,4 +392,8 @@ void PLUGIN_FUNCTION(deinit)(void)
+ }
+ 
+ /* put dovecot version we built against into plugin for checking */
++#if DOVECOT_IS_GE(2,2)
++const char *PLUGIN_FUNCTION(version) = DOVECOT_ABI_VERSION;
++#else
+ const char *PLUGIN_FUNCTION(version) = PACKAGE_VERSION;
++#endif
 diff --git a/antispam-plugin.h b/antispam-plugin.h
-index 280bb12..72b906d 100644
+index 280bb12..62a3eb3 100644
 --- a/antispam-plugin.h
 +++ b/antispam-plugin.h
+@@ -10,7 +10,6 @@
+ #include "client.h"
+ #endif
+ #include "ostream.h"
+-#include "dict.h"
+ #include "imap-search.h"
+ #include <stdlib.h>
+ 
+@@ -43,6 +42,7 @@ struct signature_config {
+ };
+ 
+ struct antispam_debug_config {
++	const char *prefix;
+ 	enum antispam_debug_target target;
+ 	int verbose;
+ };
 @@ -98,8 +98,10 @@ struct antispam_config {
  			int extra_env_num;
  		} crm;
@@ -15,17 +80,116 @@ index 280bb12..72b906d 100644
  			const char *pipe_binary;// = "/usr/sbin/sendmail";
  			const char *tmpdir;// = "/tmp";
  			char **extra_args;
-@@ -260,7 +262,7 @@ o_stream_create_from_fd(int fd, pool_t pool ATTR_UNUSED)
+@@ -204,12 +206,6 @@ o_stream_create_from_fd(int fd, pool_t pool)
+ 	return o_stream_create_file(fd, pool, 0, TRUE);
+ }
+ 
+-static inline struct dict *
+-string_dict_init(const char *uri, const char *username)
+-{
+-	return dict_init(uri, username);
+-}
+-
+ static inline int _mail_get_stream(struct mail *mail,
+ 				   struct message_size *hdr_size,
+ 				   struct message_size *body_size,
+@@ -222,6 +218,11 @@ static inline int _mail_get_stream(struct mail *mail,
+ 	return 0;
+ }
+ #define mail_get_stream _mail_get_stream
++
++#define T_BEGIN \
++	STMT_START { t_push();
++#define T_END \
++	t_pop(); } STMT_END
+ #elif DOVECOT_IS_EQ(1, 1)
+ #define mempool_unref		pool_unref
+ #define module_arg		void
+@@ -231,7 +232,7 @@ static inline const char *const *
+ get_mail_headers(struct mail *mail, const char *hdr)
+ {
+ 	const char *const *ret;
+-	if (mail_get_headers(mail, hdr, &ret))
++	if (mail_get_headers(mail, hdr, &ret) < 0)
+ 		return NULL;
+ 	return ret;
+ }
+@@ -250,7 +251,7 @@ static inline const char *const *
+ get_mail_headers(struct mail *mail, const char *hdr)
+ {
+ 	const char *const *ret;
+-	if (mail_get_headers(mail, hdr, &ret))
++	if (mail_get_headers(mail, hdr, &ret) < 0)
+ 		return NULL;
+ 	return ret;
+ }
+@@ -260,7 +261,7 @@ o_stream_create_from_fd(int fd, pool_t pool ATTR_UNUSED)
  {
  	return o_stream_create_fd(fd, 0, TRUE);
  }
 -#elif DOVECOT_IS_EQ(2, 0)
-+#elif DOVECOT_IS_EQ(2, 0) || DOVECOT_IS_EQ(2, 1)
++#elif DOVECOT_IS_EQ(2, 0) || DOVECOT_IS_EQ(2, 1) || DOVECOT_IS_EQ(2, 2)
  #define mempool_unref		pool_unref
  #define module_arg		struct module *
  #define ME(err)			MAIL_ERROR_ ##err,
+@@ -269,7 +270,7 @@ static inline const char *const *
+ get_mail_headers(struct mail *mail, const char *hdr)
+ {
+ 	const char *const *ret;
+-	if (mail_get_headers(mail, hdr, &ret))
++	if (mail_get_headers(mail, hdr, &ret) < 0)
+ 		return NULL;
+ 	return ret;
+ }
+@@ -279,12 +280,6 @@ o_stream_create_from_fd(int fd, pool_t pool ATTR_UNUSED)
+ {
+ 	return o_stream_create_fd(fd, 0, TRUE);
+ }
+-
+-static inline struct dict *
+-string_dict_init(const char *uri, const char *username)
+-{
+-	return dict_init(uri, DICT_DATA_TYPE_STRING, username, NULL);
+-}
+ #else
+ #error "Building against this dovecot version is not supported"
+ #endif
+diff --git a/antispam-storage-1.1.c b/antispam-storage-1.1.c
+index f28a0cf..aab23d9 100644
+--- a/antispam-storage-1.1.c
++++ b/antispam-storage-1.1.c
+@@ -508,10 +508,10 @@ void antispam_mail_storage_created(struct mail_storage *storage)
+ 
+ static const char *_getenv(const char *env, void *data ATTR_UNUSED)
+ {
+-	t_push();
++	T_BEGIN {
+ 	env = t_str_ucase(t_strconcat("antispam_", env, NULL));
+ 	env = getenv(env);
+-	t_pop();
++	} T_END;
+ 
+ 	return env;
+ }
+diff --git a/antispam-storage-1.2.c b/antispam-storage-1.2.c
+index 5e0cb97..269a373 100644
+--- a/antispam-storage-1.2.c
++++ b/antispam-storage-1.2.c
+@@ -498,10 +498,10 @@ void antispam_mail_storage_created(struct mail_storage *storage)
+ 
+ static const char *_getenv(const char *env, void *data ATTR_UNUSED)
+ {
+-	t_push();
++	T_BEGIN {
+ 	env = t_str_ucase(t_strconcat("antispam_", env, NULL));
+ 	env = getenv(env);
+-	t_pop();
++	} T_END;
+ 
+ 	return env;
+ }
 diff --git a/antispam-storage-2.0.c b/antispam-storage-2.0.c
-index 5a089bc..3e67553 100644
+index 5a089bc..c3d6251 100644
 --- a/antispam-storage-2.0.c
 +++ b/antispam-storage-2.0.c
 @@ -472,7 +472,7 @@ static void antispam_mailbox_allocated(struct mailbox *box)
@@ -37,8 +201,22 @@ index 5a089bc..3e67553 100644
  
  	v->free = antispam_mailbox_free;
  
+@@ -494,11 +494,11 @@ static const char *_getenv(const char *name, void *data)
+ 	struct mail_user *user = data;
+ 	const char *env;
+ 
+-	t_push();
++	T_BEGIN {
+ 	env = t_strconcat("antispam_", t_str_lcase(name), NULL);
+ 
+ 	env = mail_user_plugin_getenv(user, env);
+-	t_pop();
++	} T_END;
+ 
+ 	return env;
+ }
 diff --git a/antispam.7 b/antispam.7
-index 5e33e4c..5d077f0 100644
+index 5e33e4c..497da58 100644
 --- a/antispam.7
 +++ b/antispam.7
 @@ -1,4 +1,4 @@
@@ -47,7 +225,17 @@ index 5e33e4c..5d077f0 100644
  .SH NAME
  antispam \- The dovecot antispam plugin.
  
-@@ -206,6 +206,11 @@ plugin {
+@@ -120,6 +120,9 @@ plugin {
+     # antispam_debug_target = syslog
+     # antispam_debug_target = stderr
+     # antispam_verbose_debug = 1
++    #
++    # This can be used to get a prefix, e.g. by specifying %u in it
++    # antispam_debug_prefix = "antispam: "
+ 
+     # backend selection, MUST be configured first,
+     # there's no default so you need to set one of
+@@ -206,6 +209,11 @@ plugin {
      # semicolon-separated list of blacklisted results, case insensitive
      # antispam_dspam_result_blacklist = Virus
  
@@ -59,7 +247,7 @@ index 5e33e4c..5d077f0 100644
      #=====================
      # pipe plugin
      #
-@@ -228,6 +233,14 @@ plugin {
+@@ -228,6 +236,14 @@ plugin {
      # "mailtrain" are still valid, these are, in the same order as
      # above: antispam_mail_sendmail, antispam_mail_sendmail_args,
      # antispam_mail_spam, antispam_mail_notspam and antispam_mail_tmpdir.
@@ -74,7 +262,7 @@ index 5e33e4c..5d077f0 100644
  
      # temporary directory
      antispam_pipe_tmpdir = /tmp
-@@ -247,7 +260,7 @@ plugin {
+@@ -247,7 +263,7 @@ plugin {
      antispam_crm_binary = /bin/false
      # antispam_crm_binary = /usr/share/crm114/mailreaver.crm
  
@@ -83,7 +271,7 @@ index 5e33e4c..5d077f0 100644
      # (default unset i.e. none)
      # antispam_crm_args =
      # antispam_crm_args = --config=/path/to/config
-@@ -257,11 +270,6 @@ plugin {
+@@ -257,11 +273,6 @@ plugin {
      # antispam_crm_env =
      # antispam_crm_env = HOME=%h;USER=%u
  
@@ -95,11 +283,100 @@ index 5e33e4c..5d077f0 100644
      # NOTE: you need to set the signature for this backend
      antispam_signature = X-CRM114-CacheID
  
+diff --git a/crm114-exec.c b/crm114-exec.c
+index 5b39ca9..d786e04 100644
+--- a/crm114-exec.c
++++ b/crm114-exec.c
+@@ -113,7 +113,7 @@ static int call_reaver(const struct antispam_config *cfg,
+ 
+ 		debugv(&cfg->dbgcfg, argv);
+ 
+-		t_push();
++		T_BEGIN {
+ 		for (i = 0; i < cfg->crm.extra_env_num; i++) {
+ 			char *name, *value;
+ 			name = t_strdup_noconst(cfg->crm.extra_env[i]);
+@@ -124,7 +124,7 @@ static int call_reaver(const struct antispam_config *cfg,
+ 			}
+ 			setenv(name, value, 1);
+ 		}
+-		t_pop();
++		} T_END;
+ 
+ 		execv(cfg->crm.reaver_binary, argv);
+ 		/* fall through if reaver can't be found */
+diff --git a/debug.c b/debug.c
+index d2683fa..77f0167 100644
+--- a/debug.c
++++ b/debug.c
+@@ -1,4 +1,3 @@
+-#define _BSD_SOURCE
+ #include <syslog.h>
+ #include <stdarg.h>
+ #include <stdio.h>
+@@ -14,9 +13,9 @@ static void _debug(const struct antispam_debug_config *cfg,
+ 	if (cfg->target == ADT_NONE)
+ 		return;
+ 
+-	t_push();
++	T_BEGIN {
+ 
+-	fmt = t_strconcat("antispam: ", format, NULL);
++	fmt = t_strconcat(cfg->prefix, format, NULL);
+ 
+ 	switch (cfg->target) {
+ 	case ADT_NONE:
+@@ -30,7 +29,7 @@ static void _debug(const struct antispam_debug_config *cfg,
+ 		break;
+ 	}
+ 
+-	t_pop();
++	} T_END;
+ }
+ 
+ void debug(const struct antispam_debug_config *cfg, const char *fmt, ...)
+@@ -48,7 +47,7 @@ void debugv(const struct antispam_debug_config *cfg, char **args)
+ 	char *buf;
+ 	const char *str;
+ 
+-	t_push();
++	T_BEGIN {
+ 	buf = t_buffer_get(buflen);
+ 
+ 	while (1) {
+@@ -72,7 +71,7 @@ void debugv(const struct antispam_debug_config *cfg, char **args)
+ 	t_buffer_alloc(pos);
+ 
+ 	debug(cfg, "%s", buf);
+-	t_pop();
++	} T_END;
+ }
+ 
+ void debugv_not_stderr(const struct antispam_debug_config *cfg, char **args)
+@@ -111,6 +110,10 @@ int debug_init(struct antispam_debug_config *cfg,
+ 			return -1;
+ 	}
+ 
++	cfg->prefix = getenv("DEBUG_PREFIX", getenv_data);
++	if (!cfg->prefix)
++		cfg->prefix = "antispam: ";
++
+ 	debug(cfg, "plugin initialising (%s)\n", ANTISPAM_VERSION);
+ 
+ 	tmp = getenv("VERBOSE_DEBUG", getenv_data);
 diff --git a/dovecot-version.c b/dovecot-version.c
-index cbcb35b..0026fbf 100644
+index cbcb35b..fe9bc73 100644
 --- a/dovecot-version.c
 +++ b/dovecot-version.c
-@@ -17,21 +17,24 @@ int main(int argc, char **argv)
+@@ -1,6 +1,7 @@
+ #include <stdio.h>
+ #include <string.h>
+ #include <stdlib.h>
++#include <ctype.h>
+ #include "config.h"
+ 
+ int main(int argc, char **argv)
+@@ -17,21 +18,24 @@ int main(int argc, char **argv)
  
  	maj = strtol(v, &e, 10);
  	if (v == e)
@@ -125,24 +402,66 @@ index cbcb35b..0026fbf 100644
 +			if (v == e)
 +				return 4;
 +		} else
-+			patch = 255;
++			patch = 0;
  	}
  
  	printf("/* Auto-generated file, do not edit */\n\n");
-@@ -50,6 +53,11 @@ int main(int argc, char **argv)
+@@ -40,6 +44,8 @@ int main(int argc, char **argv)
+ 	
+ 	printf("#define DOVECOT_VCODE				"
+ 		"0x%.2x%.2x%.2x\n", maj, min, 0);
++	printf("#define DOVECOT_VCODE_PATCH			"
++		"0x%.2x%.2x%.2x\n", maj, min, patch);
+ 	printf("#define DOVECOT_IS_EQ(maj, min)			"
+ 		"DOVECOT_VCODE == DOVECOT_VERSION_CODE(maj, min, 0)\n");
+ 	printf("#define DOVECOT_IS_GT(maj, min)			"
+@@ -50,6 +56,22 @@ int main(int argc, char **argv)
  		"DOVECOT_VCODE < DOVECOT_VERSION_CODE(maj, min, 0)\n");
  	printf("#define DOVECOT_IS_LE(maj, min)			"
  		"DOVECOT_VCODE <= DOVECOT_VERSION_CODE(maj, min, 0)\n");
 +
-+	/* Use the antispam-storage-2.0.c for dovecot 2.1 as well */
-+	if (maj == 2 && min == 1)
++	printf("#define DOVECOT_P_IS_EQ(maj, min, patch)	"
++		"DOVECOT_VCODE_PATCH == DOVECOT_VERSION_CODE(maj, min, patch)\n");
++	printf("#define DOVECOT_P_IS_GT(maj, min, patch)	"
++		"DOVECOT_VCODE_PATCH > DOVECOT_VERSION_CODE(maj, min, patch)\n");
++	printf("#define DOVECOT_P_IS_GE(maj, min, patch)	"
++		"DOVECOT_VCODE_PATCH >= DOVECOT_VERSION_CODE(maj, min, patch)\n");
++	printf("#define DOVECOT_P_IS_LT(maj, min, patch)	"
++		"DOVECOT_VCODE_PATCH < DOVECOT_VERSION_CODE(maj, min, patch)\n");
++	printf("#define DOVECOT_P_IS_LE(maj, min, patch)	"
++		"DOVECOT_VCODE_PATCH <= DOVECOT_VERSION_CODE(maj, min, patch)\n");
++
++	/* Use the antispam-storage-2.0.c for dovecot 2.1 and 2.2 as well */
++	if (maj == 2 && min < 3)
 +		min = 0;
 +
  	printf("#define ANTISPAM_STORAGE			"
  		"\"antispam-storage-%d.%d.c\"\n", maj, min);
  
+diff --git a/dspam-exec.c b/dspam-exec.c
+index 2e353ce..856babb 100644
+--- a/dspam-exec.c
++++ b/dspam-exec.c
+@@ -141,7 +141,7 @@ static int call_dspam(const struct antispam_config *cfg,
+ 		 */
+ 		debugv_not_stderr(&cfg->dbgcfg, argv);
+ 
+-		t_push();
++		T_BEGIN {
+ 		for (i = 0; i < cfg->dspam.extra_env_num; i++) {
+ 			char *name, *value;
+ 			name = t_strdup_noconst(cfg->dspam.extra_env[i]);
+@@ -152,7 +152,7 @@ static int call_dspam(const struct antispam_config *cfg,
+ 			}
+ 			setenv(name, value, 1);
+ 		}
+-		t_pop();
++		} T_END;
+ 
+ 		execv(cfg->dspam.binary, argv);
+ 		debug(&cfg->dbgcfg, "executing %s failed: %d (uid=%d, gid=%d)",
 diff --git a/pipe.c b/pipe.c
-index 18c2233..a20b4aa 100644
+index 18c2233..f9abef5 100644
 --- a/pipe.c
 +++ b/pipe.c
 @@ -34,16 +34,19 @@
@@ -164,7 +483,7 @@ index 18c2233..a20b4aa 100644
  	case CLASS_NOTSPAM:
 -		dest = cfg->pipe.ham_arg;
 +		dest = cfg->pipe.ham_args;
-+		dest_num = cfg->pipe.spam_args_num;
++		dest_num = cfg->pipe.ham_args_num;
  		break;
  	}
  
@@ -196,6 +515,42 @@ index 18c2233..a20b4aa 100644
  
  		dup2(mailfd, 0);
  		fd = open("/dev/null", O_WRONLY);
+@@ -128,7 +136,7 @@ static int process_tmpdir(const struct antispam_config *cfg,
+ 	enum classification wanted;
+ 	int rc = 0;
+ 
+-	t_push();
++	T_BEGIN {
+ 
+ 	buf = t_malloc(20 + ast->tmplen);
+ 
+@@ -151,7 +159,7 @@ static int process_tmpdir(const struct antispam_config *cfg,
+ 		close(fd);
+ 	}
+ 
+-	t_pop();
++	} T_END;
+ 
+ 	return rc;
+ }
+@@ -160,7 +168,7 @@ static void clear_tmpdir(struct antispam_transaction_context *ast)
+ {
+ 	char *buf;
+ 
+-	t_push();
++	T_BEGIN {
+ 
+ 	buf = t_malloc(20 + ast->tmplen);
+ 
+@@ -172,7 +180,7 @@ static void clear_tmpdir(struct antispam_transaction_context *ast)
+ 	}
+ 	rmdir(ast->tmpdir);
+ 
+-	t_pop();
++	} T_END;
+ }
+ 
+ static void backend_rollback(const struct antispam_config *cfg ATTR_UNUSED,
 @@ -228,7 +236,7 @@ static int backend_handle_mail(const struct antispam_config *cfg,
  		return -1;
  	}
@@ -205,6 +560,26 @@ index 18c2233..a20b4aa 100644
  		mail_storage_set_error(t->box->storage,
  				       ME(NOTPOSSIBLE)
  				       "antispam plugin not configured");
+@@ -242,7 +250,7 @@ static int backend_handle_mail(const struct antispam_config *cfg,
+ 		return -1;
+ 	}
+ 
+-	t_push();
++	T_BEGIN {
+ 
+ 	buf = t_malloc(20 + ast->tmplen);
+ 	i_snprintf(buf, 20 + ast->tmplen - 1, "%s/%d", ast->tmpdir, ast->count);
+@@ -303,8 +311,8 @@ static int backend_handle_mail(const struct antispam_config *cfg,
+ 	o_stream_destroy(&outstream);
+  out_close:
+ 	close(fd);
+- out:
+-	t_pop();
++ out:	;
++	} T_END;
+ 
+ 	return ret;
+ }
 @@ -316,20 +324,50 @@ static void backend_init(struct antispam_config *cfg,
  	const char *tmp;
  	int i;
@@ -266,3 +641,37 @@ index 18c2233..a20b4aa 100644
  	}
  
  	tmp = getenv("PIPE_PROGRAM", getenv_data);
+diff --git a/spool2dir.c b/spool2dir.c
+index cbd1909..d304716 100644
+--- a/spool2dir.c
++++ b/spool2dir.c
+@@ -165,7 +165,7 @@ static int backend_handle_mail(const struct antispam_config *cfg,
+ 		return -1;
+ 	}
+ 
+-	t_push();
++	T_BEGIN {
+ 
+ 	/* atomically create a _new_ file */
+ 	while (ast->count <= 9999) {
+@@ -174,9 +174,6 @@ static int backend_handle_mail(const struct antispam_config *cfg,
+ 		if (fd >= 0 || errno != EEXIST)
+ 			break;
+ 		/* current filename in buf already exists, zap it */
+-		t_pop();
+-		t_push();
+-		/* buf is invalid now! */
+ 	}
+ 
+ 	if (fd < 0) {
+@@ -225,8 +222,8 @@ static int backend_handle_mail(const struct antispam_config *cfg,
+ 	close(fd);
+ 	if (ret)
+ 		unlink(buf);
+- out:
+-	t_pop();
++ out:	;
++	} T_END;
+ 
+ 	return ret;
+ }
