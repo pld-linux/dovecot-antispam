@@ -2,7 +2,7 @@ Summary:	The dovecot antispam plugin
 Summary(pl.UTF-8):	Wtyczka antyspamowa dla dovecota
 Name:		dovecot-antispam
 Version:	2.0
-Release:	37
+Release:	38
 License:	GPL v2
 Group:		Daemons
 Source0:	http://johannes.sipsolutions.net/download/dovecot-antispam/%{name}-%{version}.tar.bz2
