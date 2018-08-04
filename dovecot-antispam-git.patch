@@ -48,7 +48,7 @@ index 7756204..76ced7b 100644
  const char *PLUGIN_FUNCTION(version) = PACKAGE_VERSION;
 +#endif
 diff --git a/antispam-plugin.h b/antispam-plugin.h
-index 280bb12..62a3eb3 100644
+index 280bb12..c974129 100644
 --- a/antispam-plugin.h
 +++ b/antispam-plugin.h
 @@ -10,7 +10,6 @@
@@ -141,16 +141,34 @@ index 280bb12..62a3eb3 100644
  		return NULL;
  	return ret;
  }
-@@ -279,12 +280,6 @@ o_stream_create_from_fd(int fd, pool_t pool ATTR_UNUSED)
+@@ -279,12 +280,27 @@ o_stream_create_from_fd(int fd, pool_t pool ATTR_UNUSED)
  {
  	return o_stream_create_fd(fd, 0, TRUE);
  }
--
++#elif DOVECOT_IS_EQ(2, 3)
++#define mempool_unref		pool_unref
++#define module_arg		struct module *
++#define ME(err)			MAIL_ERROR_ ##err,
++
++static inline const char *const *
++get_mail_headers(struct mail *mail, const char *hdr)
++{
++	const char *const *ret;
++	if (mail_get_headers(mail, hdr, &ret) < 0)
++		return NULL;
++	return ret;
++}
+ 
 -static inline struct dict *
 -string_dict_init(const char *uri, const char *username)
--{
++static inline struct ostream *
++o_stream_create_from_fd(int fd, pool_t pool ATTR_UNUSED)
+ {
 -	return dict_init(uri, DICT_DATA_TYPE_STRING, username, NULL);
--}
++	return o_stream_create_fd_autoclose(&fd, 0);
+ }
++
++#define t_malloc t_malloc0
  #else
  #error "Building against this dovecot version is not supported"
  #endif
@@ -189,10 +207,43 @@ index 5e0cb97..269a373 100644
  	return env;
  }
 diff --git a/antispam-storage-2.0.c b/antispam-storage-2.0.c
-index 5a089bc..c3d6251 100644
+index 5a089bc..ce522b1 100644
 --- a/antispam-storage-2.0.c
 +++ b/antispam-storage-2.0.c
-@@ -472,7 +472,7 @@ static void antispam_mailbox_allocated(struct mailbox *box)
+@@ -108,6 +108,7 @@ antispam_copy(struct mail_save_context *ctx, struct mail *mail)
+ 	if (mailbox_is_unsure(asbox->cfg, t->box)) {
+ 		mail_storage_set_error(t->box->storage, MAIL_ERROR_NOTPOSSIBLE,
+ 				       "Cannot copy to unsure folder");
++		mailbox_save_cancel(&ctx);
+ 		return -1;
+ 	}
+ 
+@@ -378,14 +379,22 @@ antispam_mail_update_keywords(struct mail *mail,
+ 
+ static struct mailbox_transaction_context *
+ antispam_mailbox_transaction_begin(struct mailbox *box,
+-				   enum mailbox_transaction_flags flags)
++				   enum mailbox_transaction_flags flags
++#if DOVECOT_IS_GE(2, 3)
++				   , const char *reason
++#endif
++				   )
+ {
+ 	struct antispam_mailbox *asbox = ANTISPAM_CONTEXT(box);
+ 	struct mailbox_transaction_context *t;
+ 	struct antispam_transaction_context *ast;
+ 	struct antispam_internal_context *aic;
+ 
+-	t = asbox->module_ctx.super.transaction_begin(box, flags);
++	t = asbox->module_ctx.super.transaction_begin(box, flags
++#if DOVECOT_IS_GE(2, 3)
++						      , reason
++#endif
++	);
+ 	aic = i_new(struct antispam_internal_context, 1);
+ 	ast = antispam_transaction_begin(box);
+ 	aic->backendctx = ast;
+@@ -472,7 +481,7 @@ static void antispam_mailbox_allocated(struct mailbox *box)
  
  	asbox->save_hack = FALSE;
  	asbox->movetype = MMT_APPEND;
@@ -201,7 +252,7 @@ index 5a089bc..c3d6251 100644
  
  	v->free = antispam_mailbox_free;
  
-@@ -494,11 +494,11 @@ static const char *_getenv(const char *name, void *data)
+@@ -494,11 +503,11 @@ static const char *_getenv(const char *name, void *data)
  	struct mail_user *user = data;
  	const char *env;
  
@@ -365,7 +416,7 @@ index d2683fa..77f0167 100644
  
  	tmp = getenv("VERBOSE_DEBUG", getenv_data);
 diff --git a/dovecot-version.c b/dovecot-version.c
-index cbcb35b..fe9bc73 100644
+index cbcb35b..d4744f0 100644
 --- a/dovecot-version.c
 +++ b/dovecot-version.c
 @@ -1,6 +1,7 @@
@@ -431,8 +482,8 @@ index cbcb35b..fe9bc73 100644
 +	printf("#define DOVECOT_P_IS_LE(maj, min, patch)	"
 +		"DOVECOT_VCODE_PATCH <= DOVECOT_VERSION_CODE(maj, min, patch)\n");
 +
-+	/* Use the antispam-storage-2.0.c for dovecot 2.1 and 2.2 as well */
-+	if (maj == 2 && min < 3)
++	/* Use the antispam-storage-2.0.c for dovecot 2.1 - 2.3 as well */
++	if (maj == 2 && min < 4)
 +		min = 0;
 +
  	printf("#define ANTISPAM_STORAGE			"
