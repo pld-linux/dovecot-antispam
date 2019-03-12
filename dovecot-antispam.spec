@@ -26,6 +26,7 @@ way it was moved).
 %build
 unset GIT_DIR
 %{__make} \
+	CC="%{__cc}" \
 	CFLAGS="%{rpmcflags}" \
 	LDFLAGS="%{rpmldflags}"
 
