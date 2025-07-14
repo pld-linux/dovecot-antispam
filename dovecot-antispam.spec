@@ -21,7 +21,7 @@ way it was moved).
 
 %prep
 %setup -q
-%patch0 -p1
+%patch -P0 -p1
 
 %build
 unset GIT_DIR
